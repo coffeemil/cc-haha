@@ -506,6 +506,7 @@ function AgentCallCard({
   const statusClassName = getAgentStatusClassName(status)
   const statusLabel = getAgentStatusLabel(status, t)
   const taskSummary = agentTaskNotification?.summary?.trim() || ''
+  const taskResult = agentTaskNotification?.result?.trim() || ''
   const errorText =
     status === 'failed'
       ? taskSummary || (result?.isError ? getAgentErrorSummary(result.content) : '')
@@ -516,7 +517,7 @@ function AgentCallCard({
     result && !result.isError && !isLaunchResult && !isAgentLifecycleResult(result.content)
       ? extractAgentDisplayText(result.content).trim()
       : ''
-  const previewText = fullOutputText || (status === 'done' || status === 'stopped' ? taskSummary : '')
+  const previewText = fullOutputText || (status === 'done' || status === 'stopped' ? taskResult || taskSummary : '')
   const outputSummary = previewText ? getAgentOutputSummary(previewText) : ''
   const description = typeof input.description === 'string' ? input.description : ''
 

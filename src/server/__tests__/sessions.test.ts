@@ -1732,7 +1732,7 @@ describe('Sessions API', () => {
       makeUserEntry('Hello'),
       makeAssistantEntry('World'),
       makeUserEntry(
-        '<task-notification>\n<task-id>bg-1</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>failed</status>\n<summary>Background command failed &amp; stopped</summary>\n<output-file>C:\\Temp\\bg.output</output-file>\n</task-notification>',
+        '<task-notification>\n<task-id>bg-1</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>failed</status>\n<summary>Background command failed &amp; stopped</summary>\n<result>Stack trace &amp; failed assertion</result>\n<output-file>C:\\Temp\\bg.output</output-file>\n</task-notification>',
         crypto.randomUUID(),
       ),
       makeAssistantEntry('internal task response'),
@@ -1753,6 +1753,7 @@ describe('Sessions API', () => {
         toolUseId: 'toolu_bg',
         status: 'failed',
         summary: 'Background command failed & stopped',
+        result: 'Stack trace & failed assertion',
         outputFile: 'C:\\Temp\\bg.output',
         timestamp: expect.any(String),
       },

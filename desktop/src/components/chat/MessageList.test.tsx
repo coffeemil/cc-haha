@@ -771,6 +771,68 @@ describe('MessageList nested tool calls', () => {
     expect(toolGroups.map((item) => item.toolCalls[0]?.toolUseId)).toEqual(['agent-1', 'write-1'])
   })
 
+  it('keeps task-management tools from downgrading dispatched agents into a mixed tool tree', () => {
+    const messages: UIMessage[] = [
+      {
+        id: 'tool-task-create',
+        type: 'tool_use',
+        toolName: 'TaskCreate',
+        toolUseId: 'task-create-1',
+        input: { subject: 'Review recent changes' },
+        timestamp: 1,
+      },
+      {
+        id: 'tool-task-update',
+        type: 'tool_use',
+        toolName: 'TaskUpdate',
+        toolUseId: 'task-update-1',
+        input: { id: '1', status: 'in_progress' },
+        timestamp: 2,
+      },
+      {
+        id: 'tool-agent-a',
+        type: 'tool_use',
+        toolName: 'Agent',
+        toolUseId: 'agent-a',
+        input: { description: 'Review desktop impact' },
+        timestamp: 3,
+      },
+      {
+        id: 'tool-agent-b',
+        type: 'tool_use',
+        toolName: 'Agent',
+        toolUseId: 'agent-b',
+        input: { description: 'Review runtime impact' },
+        timestamp: 4,
+      },
+      {
+        id: 'tool-agent-child-bash',
+        type: 'tool_use',
+        toolName: 'Bash',
+        toolUseId: 'agent-a-bash',
+        input: { command: 'git status --short' },
+        timestamp: 5,
+        parentToolUseId: 'agent-a',
+      },
+    ]
+
+    const { renderItems, childToolCallsByParent } = buildRenderModel(messages)
+    const toolGroups = renderItems.filter((item) => item.kind === 'tool_group')
+
+    expect(toolGroups).toHaveLength(2)
+    expect(toolGroups[0]?.toolCalls.map((toolCall) => toolCall.toolName)).toEqual([
+      'TaskCreate',
+      'TaskUpdate',
+    ])
+    expect(toolGroups[1]?.toolCalls.map((toolCall) => toolCall.toolName)).toEqual([
+      'Agent',
+      'Agent',
+    ])
+    expect(childToolCallsByParent.get('agent-a')?.map((toolCall) => toolCall.toolUseId)).toEqual([
+      'agent-a-bash',
+    ])
+  })
+
   it('keeps later nested tool calls under their parent after an interleaved user message', () => {
     const messages: UIMessage[] = [
       {
@@ -965,6 +1027,52 @@ describe('MessageList nested tool calls', () => {
     expect(screen.getAllByText('Running').length).toBeGreaterThan(0)
     expect(screen.queryByText('Done')).toBeNull()
     expect(screen.queryByRole('button', { name: 'View result' })).toBeNull()
+  })
+
+  it('shows completed background agent result from the terminal task notification', () => {
+    const resultText = '后台 agent 已经完成：定位到 parentToolUseId 丢失并补齐了 live 事件链。'
+
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: [
+            {
+              id: 'tool-agent',
+              type: 'tool_use',
+              toolName: 'Agent',
+              toolUseId: 'agent-1',
+              input: { description: '排查 subagent UI' },
+              timestamp: 1,
+            },
+            {
+              id: 'result-agent',
+              type: 'tool_result',
+              toolUseId: 'agent-1',
+              content:
+                "Async agent launched successfully.\nagentId: a29934b04b20ed564 (internal ID - do not mention to user. Use SendMessage with to: 'a29934b04b20ed564' to continue this agent.)\nThe agent is working in the background. You will be notified automatically when it completes.",
+              isError: false,
+              timestamp: 2,
+            },
+          ],
+          agentTaskNotifications: {
+            'agent-1': {
+              taskId: 'agent-task-1',
+              toolUseId: 'agent-1',
+              status: 'completed',
+              summary: 'Agent "排查 subagent UI" completed',
+              result: resultText,
+            },
+          },
+        }),
+      },
+    })
+
+    render(<MessageList />)
+
+    expect(screen.getByText('Done')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'View result' }))
+
+    expect(within(screen.getByRole('dialog')).getByText(resultText)).toBeTruthy()
   })
 
   it('renders copy controls for user messages and scopes assistant copy to a single reply', async () => {

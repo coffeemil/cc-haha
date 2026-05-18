@@ -573,7 +573,7 @@ describe('chatStore history mapping', () => {
         id: 'task-notification',
         type: 'user',
         timestamp: '2026-04-06T00:00:00.000Z',
-        content: '<task-notification>\n<task-id>bg-1</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>\n<summary>Background command &amp; agent done</summary>\n<output-file>C:\\Temp\\bg.output</output-file>\n</task-notification>',
+        content: '<task-notification>\n<task-id>bg-1</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>\n<summary>Background command &amp; agent done</summary>\n<result>Detailed result &amp; next step</result>\n<output-file>C:\\Temp\\bg.output</output-file>\n</task-notification>',
       },
     ])
 
@@ -583,6 +583,7 @@ describe('chatStore history mapping', () => {
         toolUseId: 'toolu_bg',
         status: 'completed',
         summary: 'Background command & agent done',
+        result: 'Detailed result & next step',
         outputFile: 'C:\\Temp\\bg.output',
       },
     })
@@ -967,6 +968,49 @@ describe('chatStore history mapping', () => {
     ])
   })
 
+  it('retains live parent linkage when only content_start carries the parent id', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_start',
+      blockType: 'tool_use',
+      toolName: 'Read',
+      toolUseId: 'tool-1',
+      parentToolUseId: 'agent-1',
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: 'Read',
+      toolUseId: 'tool-1',
+      input: { file_path: 'src/App.tsx' },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_result',
+      toolUseId: 'tool-1',
+      content: 'ok',
+      isError: false,
+    })
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toMatchObject([
+      {
+        type: 'tool_use',
+        toolUseId: 'tool-1',
+        parentToolUseId: 'agent-1',
+      },
+      {
+        type: 'tool_result',
+        toolUseId: 'tool-1',
+        parentToolUseId: 'agent-1',
+      },
+    ])
+  })
+
   it('refreshes merged slash commands when a live CLI update omits project commands', async () => {
     const cliCommand = { name: 'builtin-help', description: 'Built-in command' }
     const projectCommand = { name: 'project-probe', description: 'Project custom command' }
@@ -1229,6 +1273,7 @@ describe('chatStore history mapping', () => {
         tool_use_id: 'agent-tool-1',
         status: 'completed',
         summary: 'Agent "修复异常处理" completed',
+        result: '修复了异常处理并补充了回归覆盖。',
         output_file: '/tmp/agent-output.txt',
       },
     })
@@ -1242,6 +1287,7 @@ describe('chatStore history mapping', () => {
       toolUseId: 'agent-tool-1',
       status: 'completed',
       summary: 'Agent "修复异常处理" completed',
+      result: '修复了异常处理并补充了回归覆盖。',
       outputFile: '/tmp/agent-output.txt',
     })
   })
@@ -1323,6 +1369,7 @@ describe('chatStore history mapping', () => {
         tool_use_id: 'agent-tool-1',
         status: 'completed',
         summary: 'Found and fixed localStorage corruption.',
+        result: 'Root cause was a stale session cache entry.',
         output_file: '/tmp/agent-output.txt',
         usage: {
           total_tokens: 2400,
@@ -1345,6 +1392,7 @@ describe('chatStore history mapping', () => {
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.agentTaskNotifications['agent-tool-1']).toMatchObject({
       status: 'completed',
       summary: 'Found and fixed localStorage corruption.',
+      result: 'Root cause was a stale session cache entry.',
       outputFile: '/tmp/agent-output.txt',
     })
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toHaveLength(0)

@@ -383,6 +383,15 @@ export function buildRenderModel(messages: UIMessage[]): RenderModel {
       pendingToolCalls = []
     }
   }
+  const appendRootToolCall = (toolCall: ToolCall) => {
+    const nextIsAgent = toolCall.toolName === 'Agent'
+    const pendingIsAgentGroup = pendingToolCalls.every((pendingToolCall) => pendingToolCall.toolName === 'Agent')
+
+    if (pendingToolCalls.length > 0 && pendingIsAgentGroup !== nextIsAgent) {
+      flushGroup()
+    }
+    pendingToolCalls.push(toolCall)
+  }
 
   for (const msg of messages) {
     if (msg.type === 'tool_use') {
@@ -418,7 +427,7 @@ export function buildRenderModel(messages: UIMessage[]): RenderModel {
         flushGroup()
         items.push({ kind: 'message', message: msg })
       } else {
-        pendingToolCalls.push(msg)
+        appendRootToolCall(msg)
       }
     } else {
       flushGroup()

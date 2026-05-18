@@ -144,6 +144,7 @@ type ChatStore = {
 
 const TASK_TOOL_NAMES = new Set(['TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList', 'TodoWrite'])
 const pendingTaskToolUseIdsBySession = new Map<string, Set<string>>()
+const pendingToolParentUseIdsBySession = new Map<string, Map<string, string>>()
 
 function addPendingTaskToolUseId(sessionId: string, toolUseId: string): void {
   const ids = pendingTaskToolUseIdsBySession.get(sessionId) ?? new Set<string>()
@@ -161,6 +162,34 @@ function consumePendingTaskToolUseId(sessionId: string, toolUseId: string): bool
 
 function clearPendingTaskToolUseIds(sessionId: string): void {
   pendingTaskToolUseIdsBySession.delete(sessionId)
+}
+
+function rememberPendingToolParentUseId(
+  sessionId: string,
+  toolUseId: string | null | undefined,
+  parentToolUseId: string | undefined,
+): void {
+  if (!toolUseId || !parentToolUseId) return
+  const parentUseIds = pendingToolParentUseIdsBySession.get(sessionId) ?? new Map<string, string>()
+  parentUseIds.set(toolUseId, parentToolUseId)
+  pendingToolParentUseIdsBySession.set(sessionId, parentUseIds)
+}
+
+function getPendingToolParentUseId(sessionId: string, toolUseId: string): string | undefined {
+  return pendingToolParentUseIdsBySession.get(sessionId)?.get(toolUseId)
+}
+
+function consumePendingToolParentUseId(sessionId: string, toolUseId: string): string | undefined {
+  const parentUseIds = pendingToolParentUseIdsBySession.get(sessionId)
+  if (!parentUseIds) return undefined
+  const parentToolUseId = parentUseIds.get(toolUseId)
+  parentUseIds.delete(toolUseId)
+  if (parentUseIds.size === 0) pendingToolParentUseIdsBySession.delete(sessionId)
+  return parentToolUseId
+}
+
+function clearPendingToolParentUseIds(sessionId: string): void {
+  pendingToolParentUseIdsBySession.delete(sessionId)
 }
 const AGENT_COMPLETION_NOTIFICATION_PREVIEW_CHARS = 160
 
@@ -473,6 +502,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       set((s) => ({ sessions: updateSessionIn(s.sessions, sessionId, (sess) => ({ streamingText: sess.streamingText + text })) }))
     }
     clearPendingTaskToolUseIds(sessionId)
+    clearPendingToolParentUseIds(sessionId)
     wsManager.disconnect(sessionId)
     set((s) => {
       const { [sessionId]: _, ...rest } = s.sessions
@@ -790,6 +820,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   clearMessages: (sessionId) => {
     clearPendingTaskToolUseIds(sessionId)
+    clearPendingToolParentUseIds(sessionId)
     set((s) => ({ sessions: updateSessionIn(s.sessions, sessionId, () => ({ messages: [], activeGoal: null, streamingText: '', chatState: 'idle' })) }))
   },
 
@@ -856,6 +887,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             activeThinkingId: null,
           }))
         } else if (msg.blockType === 'tool_use') {
+          rememberPendingToolParentUseId(sessionId, msg.toolUseId, msg.parentToolUseId)
           update(() => ({
             activeToolUseId: msg.toolUseId ?? null,
             activeToolName: msg.toolName ?? null,
@@ -909,11 +941,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       case 'tool_use_complete': {
         const session = get().sessions[sessionId]
         const toolName = msg.toolName || session?.activeToolName || 'unknown'
+        const toolUseId = msg.toolUseId || session?.activeToolUseId || ''
+        const parentToolUseId = msg.parentToolUseId ?? getPendingToolParentUseId(sessionId, toolUseId)
+        rememberPendingToolParentUseId(sessionId, toolUseId, parentToolUseId)
         update((s) => ({
           messages: [...s.messages, {
             id: nextId(), type: 'tool_use', toolName,
-            toolUseId: msg.toolUseId || s.activeToolUseId || '',
-            input: msg.input, timestamp: Date.now(), parentToolUseId: msg.parentToolUseId,
+            toolUseId,
+            input: msg.input, timestamp: Date.now(), parentToolUseId,
           }],
           activeToolUseId: null, activeToolName: null, activeThinkingId: null, streamingToolInput: '',
         }))
@@ -926,11 +961,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         break
       }
 
-      case 'tool_result':
+      case 'tool_result': {
+        const pendingParentToolUseId = consumePendingToolParentUseId(sessionId, msg.toolUseId)
+        const parentToolUseId = msg.parentToolUseId ?? pendingParentToolUseId
         update((s) => ({
           messages: [...s.messages, {
             id: nextId(), type: 'tool_result', toolUseId: msg.toolUseId,
-            content: msg.content, isError: msg.isError, timestamp: Date.now(), parentToolUseId: msg.parentToolUseId,
+            content: msg.content, isError: msg.isError, timestamp: Date.now(), parentToolUseId,
           }],
           chatState: 'thinking', activeThinkingId: null,
         }))
@@ -938,6 +975,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           useCLITaskStore.getState().refreshTasks(sessionId)
         }
         break
+      }
 
       case 'permission_request':
         notifyDesktop({
@@ -1122,6 +1160,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }))
           clearPendingDelta(sessionId)
           clearPendingTaskToolUseIds(sessionId)
+          clearPendingToolParentUseIds(sessionId)
           useCLITaskStore.getState().clearTasks(sessionId)
           useSessionStore.getState().updateSessionTitle(sessionId, 'New Session')
           useTabStore.getState().updateTabTitle(sessionId, 'New Session')
@@ -1203,6 +1242,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             typeof data.tool_use_id === 'string' && data.tool_use_id.trim()
               ? data.tool_use_id
               : null
+          const taskResult = readNonEmptyString(data, 'result')
           const taskStatus = data.status
           if (taskEvent) {
             const now = Date.now()
@@ -1228,6 +1268,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                           toolUseId,
                           status: taskStatus,
                           summary: taskEvent.summary,
+                          result: taskResult,
                           outputFile: taskEvent.outputFile,
                           usage: taskEvent.usage,
                         },
@@ -1547,12 +1588,14 @@ function extractTaskNotification(content: unknown): AgentTaskNotification | null
 
   const taskId = readXmlTag(xml, 'task-id') || toolUseId
   const summary = readXmlTag(xml, 'summary')
+  const result = readXmlTag(xml, 'result')
   const outputFile = readXmlTag(xml, 'output-file')
   return {
     taskId,
     toolUseId,
     status,
     ...(summary ? { summary } : {}),
+    ...(result ? { result } : {}),
     ...(outputFile ? { outputFile } : {}),
   }
 }
